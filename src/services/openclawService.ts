@@ -35,13 +35,19 @@ export class OpenClawService {
     }
 
     try {
-      const response = await fetch(`${this.gatewayUrl}/api/chat`, {
+      // OpenAI-compatible chat completions format
+      const response = await fetch(`${this.gatewayUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.token}`,
         },
-        body: JSON.stringify({ message: content }),
+        body: JSON.stringify({
+          model: 'openclaw:main',
+          messages: [
+            { role: 'user', content }
+          ],
+        }),
       });
 
       if (!response.ok) {
@@ -49,13 +55,14 @@ export class OpenClawService {
       }
 
       const data = await response.json();
+      const choice = data.choices?.[0];
       
       return {
         id: data.id || Date.now().toString(),
         role: 'assistant',
-        content: data.content || data.message,
+        content: choice?.message?.content || 'No response',
         timestamp: Date.now(),
-        twin: data.twin, // 'case' or 'tars'
+        twin: data.twin, // 'case' or 'tars' (if gateway provides this)
       };
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -69,7 +76,8 @@ export class OpenClawService {
     }
 
     try {
-      const response = await fetch(`${this.gatewayUrl}/api/health`, {
+      // Test with a simple models list request
+      const response = await fetch(`${this.gatewayUrl}/v1/models`, {
         headers: {
           'Authorization': `Bearer ${this.token}`,
         },
