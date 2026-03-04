@@ -3,12 +3,18 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { ChatScreen } from './src/screens/ChatScreen';
+import { MeetingRecordScreen } from './src/screens/MeetingRecordScreen';
+import { MeetingNotesScreen } from './src/screens/MeetingNotesScreen';
 import { openClawService } from './src/services/openclawService';
+import { meetingService } from './src/services/meetingService';
+import { MeetingNote } from './src/types/meeting';
 
 type AppState = 'loading' | 'locked' | 'setup' | 'ready';
+type Screen = 'chat' | 'meeting-record' | 'meeting-notes';
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('loading');
+  const [currentScreen, setCurrentScreen] = useState<Screen>('chat');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -17,14 +23,12 @@ export default function App() {
 
   const initializeApp = async () => {
     try {
-      // Check if already configured
       const configured = await openClawService.initialize();
+      await meetingService.initialize();
       
       if (configured) {
-        // Already configured - require biometric auth
         setAppState('locked');
       } else {
-        // Not configured - go to setup
         setAppState('setup');
       }
     } catch (err) {
@@ -39,7 +43,6 @@ export default function App() {
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
       if (!hasHardware || !isEnrolled) {
-        // No biometric available - skip auth for now
         setAppState('ready');
         return;
       }
@@ -61,13 +64,23 @@ export default function App() {
   };
 
   const handleSetup = async () => {
-    // TODO: Implement QR code scanning or manual entry
-    // For now, just mark as ready for testing
     await openClawService.configure(
-      'http://localhost:3456', // Placeholder - will be scanned/entered
+      'http://localhost:3456',
       'demo-token'
     );
     setAppState('locked');
+  };
+
+  const handleMeetingComplete = (note: MeetingNote) => {
+    setCurrentScreen('meeting-notes');
+  };
+
+  const handleShareWithAgent = async (note: MeetingNote) => {
+    const response = await meetingService.shareWithAgent(note);
+    if (response) {
+      // Switch to chat and show the agent's response
+      setCurrentScreen('chat');
+    }
   };
 
   // Loading screen
@@ -115,11 +128,66 @@ export default function App() {
     );
   }
 
-  // Main chat screen
+  // Main app with navigation
   return (
     <View style={styles.mainContainer}>
       <StatusBar style="light" />
-      <ChatScreen />
+      
+      {currentScreen === 'chat' && <ChatScreen />}
+      
+      {currentScreen === 'meeting-record' && (
+        <MeetingRecordScreen
+          onComplete={handleMeetingComplete}
+          onCancel={() => setCurrentScreen('chat')}
+        />
+      )}
+      
+      {currentScreen === 'meeting-notes' && (
+        <MeetingNotesScreen
+          onBack={() => setCurrentScreen('chat')}
+          onRecord={() => setCurrentScreen('meeting-record')}
+          onShareWithAgent={handleShareWithAgent}
+        />
+      )}
+
+      {/* Bottom Tab Bar */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={styles.tab}
+          onPress={() => setCurrentScreen('chat')}
+        >
+          <Text style={[styles.tabEmoji, currentScreen === 'chat' && styles.tabActive]}>
+            💬
+          </Text>
+          <Text style={[styles.tabLabel, currentScreen === 'chat' && styles.tabLabelActive]}>
+            Chat
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.tab}
+          onPress={() => setCurrentScreen('meeting-record')}
+        >
+          <Text style={[styles.tabEmoji, currentScreen === 'meeting-record' && styles.tabActive]}>
+            🎙️
+          </Text>
+          <Text style={[styles.tabLabel, currentScreen === 'meeting-record' && styles.tabLabelActive]}>
+            Record
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.tab}
+          onPress={() => setCurrentScreen('meeting-notes')}
+        >
+          <Text style={[styles.tabEmoji, currentScreen === 'meeting-notes' && styles.tabActive]}>
+            📋
+          </Text>
+          <Text style={[styles.tabLabel, currentScreen === 'meeting-notes' && styles.tabLabelActive]}>
+            Notes
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -135,60 +203,42 @@ const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
     backgroundColor: '#000',
-    paddingTop: 50, // Safe area
   },
-  emoji: {
-    fontSize: 64,
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 32,
-    textAlign: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#888',
-  },
+  emoji: { fontSize: 64, marginBottom: 24 },
+  title: { fontSize: 28, fontWeight: '700', color: '#fff', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: '#888', marginBottom: 32, textAlign: 'center' },
+  loadingText: { marginTop: 16, fontSize: 16, color: '#888' },
   unlockButton: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,
   },
-  unlockButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
+  unlockButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
   setupButton: {
     backgroundColor: '#34C759',
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,
   },
-  setupButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
+  setupButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  hint: { marginTop: 24, fontSize: 14, color: '#666', textAlign: 'center' },
+  error: { marginTop: 16, fontSize: 14, color: '#FF3B30' },
+  tabBar: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    backgroundColor: '#000',
+    paddingBottom: 24,
+    paddingTop: 8,
   },
-  hint: {
-    marginTop: 24,
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 4,
   },
-  error: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#FF3B30',
-  },
+  tabEmoji: { fontSize: 24, opacity: 0.5 },
+  tabActive: { opacity: 1 },
+  tabLabel: { fontSize: 11, color: '#666', marginTop: 2 },
+  tabLabelActive: { color: '#007AFF' },
 });
